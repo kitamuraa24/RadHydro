@@ -6,13 +6,13 @@ class Mesh:
     """
     Object to handle the mesh for slab, spherical, and cylindrical
         Inputs:
-            grid_type: (str) the coord. system id.
+            - grid_type (str): the coord. system id.
                         - SLAB
                         - CYL
                         - SPH
-            dh: (1d np.array(float64)) an array of the max cell widths per region.
-            hb: (1d np.array(float64)) an array containing the bounds of each region.
-            verbosity: (bool) Verbosity of the simulation (Default: False)
+            - dh (1d np.array(float64)): an array of the max cell widths per region.
+            - hb (1d np.array(float64)): an array containing the bounds of each region.
+            - verbosity (bool): Verbosity of the process (Default: False)
         Outputs: Generate the mesh vertices, cell centers, areas, and volumes 
     """
     def __init__(self, grid_type, dh, hb, verbosity=False):
@@ -45,7 +45,7 @@ class Mesh:
             temp_verts = np.concatenate([np.linspace(start, end, num + 1) for start, end, num in zip(h_start, h_end, num_cells_per_zone)])
             # Need to remove duplicate nodes
             self.vertices = np.unique(temp_verts)
-            self.x_centers = self.vertices[:-1] + self.dh / 2 
+            self.centroids = self.vertices[:-1] + self.dh / 2 
             # Handle Areas and Volumes
             if self.grid_type == 'SLAB':
                 self.A = np.ones(self.ncells + 1)
@@ -64,9 +64,48 @@ class Mesh:
                 for i, (start, end, count) in enumerate(zip(h_start, h_end, num_cells_per_zone), start=1):
                     print(f"{i:<10}{start:<10.3f}{end:<10.3f}{count:<12}")
 
+class MaterialProperties:
+    """
+    Object to handle the material properties of the problem.
+        Inputs:
+            - hb (np.array(float64)): array of bounds for each zone.
+            - centers (np.array(float64)): array of cell centers (from Mesh).
+            - ncells (int): total no. of cells (from Mesh).
+            - Cv_list (np.array(float64)): array of specific heat capacities per zone.
+            - Ka_list (np.array(float64)): array of absoption opacities per zone.
+            - Ks_list (np.array(float64)): array of scattering opacities per zone.
+            - verbosity (bool): verbosity of the process (Default: False)
+    """
+    def __init__(self, hb, centroids, ncells, Cv_list, Ka_list, Ks_list, verbosity=False):
+        self.hb = hb
+        self.centroids = centroids
+        self.ncells = ncells
+        self.Cv_list = Cv_list
+        self.Ka_list = Ka_list
+        self.Ks_list = Ks_list
+        self.verbose = verbosity
 
+    def generate_matProps(self):
+        """
+        Member method to generate the material idx and properties global mapping
+        """
+        # Create material mapping for cells
+        mat_idx = np.searchsorted(self.hb, self.centroids, side='right')
+        self.Cv = self.Cv_list[mat_idx]
+        self.Ka = self.Ka_list[mat_idx]
+        self.Ks = self.Ks_list[mat_idx]
+        if self.verbose == True:
+            print(f"Material Idx: {mat_idx}")
 
 if __name__ == "__main__":
-    mesh = Mesh(grid_type="SLAB", hb=np.array([1]), dh=np.array([.02]), verbosity=True)
-    mesh.generate_uniform_submesh()
+    # hb = np.array([1])
+    # dh = np.array([.02])
+    # Cv_list = np.array([0.1])
+    # Ka_list = np.array([20])
+    # Ks_list = np.array([0.5])
+    # verbose = True
+    # mesh = Mesh("SLAB", dh, hb, verbose)
+    # mesh.generate_uniform_submesh()
+    # matProps = MaterialProperties(hb, mesh.centroids, mesh.ncells, Cv_list, Ka_list, Ks_list, verbose)
+    # matProps.generate_matProps()
 
