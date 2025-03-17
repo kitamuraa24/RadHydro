@@ -116,8 +116,31 @@ class MaterialProperties:
                 print(f"{material:<20}{count:<20}")
             print('\n')
 
+class Solver:
+    def __init__(self, mesh, matProps, bc, init_cond, max_iter, xtol, solver_type):
+        # Acceptable solvers
+        solvers = ['Hydro', 'Rad', 'RadHydro']
+        try:
+            idx = solvers.index(solver_type)
+            self.solver = solvers[idx]
+        except:
+            self.solver = None
+            valid_solver_str = ', '.join(solvers)
+            raise ValueError(f"Solver type {solver_type} not supported! Acceptable values are: {valid_solver_str}.")
+        self.mesh = mesh
+        self.matProps = matProps
+        self.bc = bc
+        self.max_iter, self.xtol = max_iter, xtol
+        # Pressure, Energy, and Temperature are stored at cell centers
+        self.P = init_cond['Pressure']
+        self.rad_e = init_cond['Radiation Energy']
+        self.mat_e = init_cond['Material Energy']
+        self.T = init_cond["Temperature"]
+        self.rho = init_cond['Density']
+        # velocities are stored at cell vertices
+        self.u = init_cond['Velocity']
 
-
+    
 
 
 
