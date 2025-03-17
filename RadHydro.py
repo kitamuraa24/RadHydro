@@ -45,24 +45,26 @@ class Mesh:
             temp_verts = np.concatenate([np.linspace(start, end, num + 1) for start, end, num in zip(h_start, h_end, num_cells_per_zone)])
             # Need to remove duplicate nodes
             self.vertices = np.unique(temp_verts)
-            self.centroids = self.vertices[:-1] + self.dh / 2 
+            cell_w = np.diff(self.vertices)
+            self.centroids = self.vertices[:-1] + cell_w / 2 
             # Handle Areas and Volumes
             if self.grid_type == 'SLAB':
                 self.A = np.ones(self.ncells + 1)
-                self.V = np.diff(self.vertices)
+                self.V = cell_w
             elif self.grid_type == 'CYL':
                 self.A = 2 * np.pi * self.vertices
                 self.V = np.pi * (self.vertices[1:]**2 - self.vertices[:-1]**2)
             else: # self.grid_type == 'SPH'
                 self.A = 4 * np.pi * self.vertices**2
                 self.V = 4/3 * np.pi * (self.vertices[1:]**3 - self.vertices[:-1]**3)
-            if self.verbose == True:
+            if self.verbose:
                 header = f"{'Region':<10}{'Start':<10}{'End':<10}{'Cell Count':<12}"
                 print(header)
                 print("-" * len(header))
                 # Iterate over each region and print the details in a formatted row
                 for i, (start, end, count) in enumerate(zip(h_start, h_end, num_cells_per_zone), start=1):
                     print(f"{i:<10}{start:<10.3f}{end:<10.3f}{count:<12}")
+                print('\n')
 
 class MaterialProperties:
     """
@@ -94,18 +96,27 @@ class MaterialProperties:
         self.Cv = self.Cv_list[mat_idx]
         self.Ka = self.Ka_list[mat_idx]
         self.Ks = self.Ks_list[mat_idx]
-        if self.verbose == True:
-            print(f"Material Idx: {mat_idx}")
+        if self.verbose:
+            # Get unique material indices and count the number of cells per material
+            unique_materials, counts = np.unique(mat_idx, return_counts=True)
+            header = f"{'Material Id':<20}{'Number of Cells':<20}"
+            print(header)
+            print("-" * len(header))
+            for material, count in zip(unique_materials, counts):
+                print(f"{material:<20}{count:<20}")
+            print('\n')
+    
+
 
 if __name__ == "__main__":
-    # hb = np.array([1])
-    # dh = np.array([.02])
-    # Cv_list = np.array([0.1])
-    # Ka_list = np.array([20])
-    # Ks_list = np.array([0.5])
-    # verbose = True
-    # mesh = Mesh("SLAB", dh, hb, verbose)
-    # mesh.generate_uniform_submesh()
-    # matProps = MaterialProperties(hb, mesh.centroids, mesh.ncells, Cv_list, Ka_list, Ks_list, verbose)
-    # matProps.generate_matProps()
+    hb = np.array([1])
+    dh = np.array([.02])
+    Cv_list = np.array([0.1])
+    Ka_list = np.array([20])
+    Ks_list = np.array([0.5])
+    verbose = True
+    mesh = Mesh("SLAB", dh, hb, verbose)
+    mesh.generate_uniform_submesh()
+    matProps = MaterialProperties(hb, mesh.centroids, mesh.ncells, Cv_list, Ka_list, Ks_list, verbose)
+    matProps.generate_matProps()
 
