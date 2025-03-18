@@ -1,5 +1,5 @@
 import numpy as np
-# Lagrangian Frame
+# Eulerian Frame
 
 # 1D RadHydro for Slab, Spherical, and Cylindrical
 class Mesh:
@@ -70,43 +70,48 @@ class Mesh:
                     print(f"{i:<10}{start:<10.3f}{end:<10.3f}{count:<12}")
                 print('\n')
 
+class MaterialProperties:
+    """
+    Object to handle the material properties of the problem.
+        Inputs:
+            - hb (np.array(float64)): array of bounds for each zone.
+            - centers (np.array(float64)): array of cell centers (from Mesh).
+            - ncells (int): total no. of cells (from Mesh).
+            - Cv_list (np.array(float64)): array of specific heat capacities per zone.
+            - Ka_list (np.array(float64)): array of absoption opacities per zone.
+            - Ks_list (np.array(float64)): array of scattering opacities per zone.
+            - verbosity (bool): verbosity of the process (Default: False)
+    """
+    def __init__(self, hb, centroids, ncells, Cv_list, Ka_list, Ks_list, verbosity=False):
+        if not (len(Cv_list) == len(Ka_list) == len(Ks_list) == len(hb)):
+            raise ValueError(
+                f"Material property lists must have length {len(hb)} (len(hb)) , "
+                f"but got lengths: Cv_list={len(Cv_list)}, Ka_list={len(Ka_list)}, Ks_list={len(Ks_list)}"
+            )
+        
+        self.hb = hb
+        self.centroids = centroids
+        self.ncells = ncells
+        self.Cv_list = Cv_list
+        self.Ka_list = Ka_list
+        self.Ks_list = Ks_list
+        self.verbose = verbosity
 
-
-class Solver:
-    def __init__(self, mesh, matProps, bc, init_cond, max_iter, xtol, solver_type):
-        # Acceptable solvers
-        solvers = ['Hydro', 'Rad', 'RadHydro']
-        try:
-            idx = solvers.index(solver_type)
-            self.solver = solvers[idx]
-        except:
-            self.solver = None
-            valid_solver_str = ', '.join(solvers)
-            raise ValueError(f"Solver type {solver_type} not supported! Acceptable values are: {valid_solver_str}.")
-        self.mesh = mesh
-        self.bc = bc
-        self.max_iter, self.xtol = max_iter, xtol
-        # Pressure, Energy, and Temperature are stored at cell centers
-        self.P = init_cond['Pressure']
-        self.rad_e = init_cond['Radiation Energy']
-        self.mat_e = init_cond['Material Energy']
-        self.T = init_cond["Temperature"]
-        self.rho = init_cond['Density']
-        # velocities are stored at cell vertices
-        self.u = init_cond['Velocity']
-
-    
-
-
-
-if __name__ == "__main__":
-    hb = np.array([1])
-    dh = np.array([.02])
-    Cv_list = np.array([0.1])
-    Ka_list = np.array([20])
-    Ks_list = np.array([0.5])
-    verbose = True
-    mesh = Mesh("SLAB", dh, hb, verbose)
-    mesh.generate_uniform_submesh()
-
-
+    def generate_matProps(self):
+        """
+        Member method to generate the material idx and properties global mapping
+        """
+        # Create material mapping for cells
+        mat_idx = np.searchsorted(self.hb, self.centroids, side='right')
+        self.Cv = self.Cv_list[mat_idx]
+        self.Ka = self.Ka_list[mat_idx]
+        self.Ks = self.Ks_list[mat_idx]
+        if self.verbose:
+            # Get unique material indices and count the number of cells per material
+            unique_materials, counts = np.unique(mat_idx, return_counts=True)
+            header = f"{'Material Id':<20}{'Number of Cells':<20}"
+            print(header)
+            print("-" * len(header))
+            for material, count in zip(unique_materials, counts):
+                print(f"{material:<20}{count:<20}")
+            print('\n')
