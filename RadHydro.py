@@ -111,17 +111,35 @@ class RadHydroSolver:
         # Values of rad_e and pressure stored at boundaries
         self.rad_e_edge = np.zeros(2)
         self.P_edge = bc.get("Pressure")
+        # Check for relfective Pressure BC
+        if self.P_edge[0] == 'reflective':
+            self.P_edge[0] = self.P[0]
+            self.P_left_BC = True
+        else:
+            self.P_left_BC = False
+        if self.P_edge[1] == 'reflective':
+            self.P_edge[1] = self.P[-1]
+            self.P_right_BC = True
+        else:
+            self.P_right_BC = False
         self.u_edge = bc.get("Velocity")
         self.rad_extr = bc.get("Radiation Energy")
         self.balance = 0
 
     def predictor_step(self):
         # Compute the edge rad_e
-        Kt_0, Kt_N = self.compute_absorption_opacity(self.T[0]) + self.Ks, self.compute_absorption_opacity(self.T[-1]) + self.Ks
-        self.rad_e_edge[0] = (3*self.rho[0]*(self.mesh.vertices[1] - self.mesh.vertices[0]) * Kt_0 * self.rad_extr[0]\
-                              + 4*self.rad_e[0])/(3*self.rho[0]*(self.mesh.vertices[1] - self.mesh.vertices[0]) * Kt_0 + 4)
-        self.rad_e_edge[-1] = (3*self.rho[-1]*(self.mesh.vertices[-1] - self.mesh.vertices[-2]) * Kt_N * self.rad_extr[-1]\
-                              + 4*self.rad_e[-1])/(3*self.rho[-1]*(self.mesh.vertices[-1] - self.mesh.vertices[-2]) * Kt_N + 4)
+        if self.rad_extr[0] == 'reflective':
+            self.rad_e_edge[0] = self.rad_e[0]
+        else:
+            Kt_0 = self.compute_absorption_opacity(self.T[0]) + self.Ks
+            self.rad_e_edge[0] = (3*self.rho[0]*(self.mesh.vertices[1] - self.mesh.vertices[0]) * Kt_0 * self.rad_extr[0]\
+                                + 4*self.rad_e[0])/(3*self.rho[0]*(self.mesh.vertices[1] - self.mesh.vertices[0]) * Kt_0 + 4)
+        if self.rad_extr[-1] == 'reflective':
+            self.rad_e_edge[-1] = self.rad_e[-1]
+        else:
+            Kt_N = self.compute_absorption_opacity(self.T[-1]) + self.Ks 
+            self.rad_e_edge[-1] = (3*self.rho[-1]*(self.mesh.vertices[-1] - self.mesh.vertices[-2]) * Kt_N * self.rad_extr[-1]\
+                                + 4*self.rad_e[-1])/(3*self.rho[-1]*(self.mesh.vertices[-1] - self.mesh.vertices[-2]) * Kt_N + 4)
         u_p = np.copy(self.u)
         self.dt = self.compute_time_step()
         # Calculate predictor u (u_p) #TODO: Treat boundary conditions
@@ -156,13 +174,25 @@ class RadHydroSolver:
         # Compute time avg
         T_k = 0.5 * (self.T + T_p)
         P_k = 0.5 * (self.P + P_p)
+        # Update pressure BC if reflective
+        if self.P_left_BC:
+            self.P_edge[0] = 0.5 * (P_p[0] + self.P_edge[0])
+        if self.P_right_BC:
+            self.P_edge[1] = 0.5 * (P_p[1] + self.P_edge[-1])
         # Update edge values for rad_e
         rad_e_edge_p = np.zeros(2)
-        Kt_0, Kt_N = self.compute_absorption_opacity(T_k[0]) + self.Ks, self.compute_absorption_opacity(T_k[-1]) + self.Ks
-        rad_e_edge_p[0] = (3*rho_k[0]*dh_k[0] * Kt_0 * self.rad_extr[0]\
-                              + 4*rad_e_k[0])/(3*rho_k[0]*dh_k[0] * Kt_0  + 4)
-        rad_e_edge_p[-1] = (3*rho_k[-1]*dh_k[-1] * Kt_N * self.rad_extr[-1]\
-                              + 4*rad_e_k[-1])/(3*rho_k[-1]*dh_k[-1] * Kt_N  + 4)
+        if self.rad_extr[0] == 'reflective':
+            rad_e_edge_p[0] = rad_e_k[0]
+        else:
+            Kt_0 = self.compute_absorption_opacity(T_k[0]) + self.Ks
+            rad_e_edge_p[0] = (3*rho_k[0]*dh_k[0] * Kt_0 * self.rad_extr[0]\
+                                + 4*rad_e_k[0])/(3*rho_k[0]*dh_k[0] * Kt_0  + 4)
+        if self.rad_extr[-1] == 'reflective':
+            rad_e_edge_p[-1] = rad_e_k[-1]
+        else:
+            Kt_N = self.compute_absorption_opacity(T_k[-1]) + self.Ks
+            rad_e_edge_p[-1] = (3*rho_k[-1]*dh_k[-1] * Kt_N * self.rad_extr[-1]\
+                                + 4*rad_e_k[-1])/(3*rho_k[-1]*dh_k[-1] * Kt_N  + 4)
         rad_e_edge_pk = 0.5 * (rad_e_edge_p + self.rad_e_edge)
         return A_k, rad_e_k, T_k, T_p, P_k, mat_e_p, rad_e_edge_pk
     
@@ -289,6 +319,9 @@ class RadHydroSolver:
         nu = (self.dt * Ka * 2* self.c * self.a * T**3)\
             /(self.Cv + self.dt * Ka * 2 *self.a * self.c * T**3)
         return nu
+
+    def set_boundary_conditions(self, ):
+
 
     def compute_predictor_energy_densities(self, u_k, A_k, rho_k, dh_k, rho_p):
         """
