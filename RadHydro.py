@@ -124,18 +124,29 @@ class RadHydroSolver:
             self.P_right_BC = False
         self.u_edge = bc.get("Velocity")
         self.rad_extr = bc.get("Radiation Energy")
+        # Check for reflective Radiation BC
+        if self.rad_extr[0] == 'reflective':
+            self.rad_left = True
+        else:
+            self.rad_left = False
+        if self.rad_extr[-1] == 'reflective':
+            self.rad_right = True
+        else:
+            self.rad_right = False
         self.balance = 0
 
     def predictor_step(self):
         # Compute the edge rad_e
-        if self.rad_extr[0] == 'reflective':
+        if self.rad_left:
             self.rad_e_edge[0] = self.rad_e[0]
+            self.rad_extr[0] = 2*self.rad_e[0]
         else:
             Kt_0 = self.compute_absorption_opacity(self.T[0]) + self.Ks
             self.rad_e_edge[0] = (3*self.rho[0]*(self.mesh.vertices[1] - self.mesh.vertices[0]) * Kt_0 * self.rad_extr[0]\
                                 + 4*self.rad_e[0])/(3*self.rho[0]*(self.mesh.vertices[1] - self.mesh.vertices[0]) * Kt_0 + 4)
-        if self.rad_extr[-1] == 'reflective':
+        if self.rad_right:
             self.rad_e_edge[-1] = self.rad_e[-1]
+            self.rad_extr[-1] = 2*self.rad_e[-1]
         else:
             Kt_N = self.compute_absorption_opacity(self.T[-1]) + self.Ks 
             self.rad_e_edge[-1] = (3*self.rho[-1]*(self.mesh.vertices[-1] - self.mesh.vertices[-2]) * Kt_N * self.rad_extr[-1]\
@@ -181,13 +192,13 @@ class RadHydroSolver:
             self.P_edge[1] = 0.5 * (P_p[1] + self.P_edge[-1])
         # Update edge values for rad_e
         rad_e_edge_p = np.zeros(2)
-        if self.rad_extr[0] == 'reflective':
+        if self.rad_left:
             rad_e_edge_p[0] = rad_e_k[0]
         else:
             Kt_0 = self.compute_absorption_opacity(T_k[0]) + self.Ks
             rad_e_edge_p[0] = (3*rho_k[0]*dh_k[0] * Kt_0 * self.rad_extr[0]\
                                 + 4*rad_e_k[0])/(3*rho_k[0]*dh_k[0] * Kt_0  + 4)
-        if self.rad_extr[-1] == 'reflective':
+        if self.rad_right:
             rad_e_edge_p[-1] = rad_e_k[-1]
         else:
             Kt_N = self.compute_absorption_opacity(T_k[-1]) + self.Ks
@@ -320,9 +331,6 @@ class RadHydroSolver:
             /(self.Cv + self.dt * Ka * 2 *self.a * self.c * T**3)
         return nu
 
-    def set_boundary_conditions(self, ):
-
-
     def compute_predictor_energy_densities(self, u_k, A_k, rho_k, dh_k, rho_p):
         """
         Member method to compute rad_e and mat_e for the predictor step
@@ -360,12 +368,20 @@ class RadHydroSolver:
                 (3*(rho_k[1:-1]*dh_k[1:-1]*Kt[1:-2] + rho_k[:-2]*dh_k[:-2]*Kt[1:-2])) + self.m[1:-1]*Ka[1:-1]*self.c*(1-nu[1:-1])*(self.a*self.T[1:-1]**4 - 0.5 * self.rad_e[1:-1])\
                     + nu[1:-1]*xi[1:-1] - 1/3*self.rad_e[1:-1]*(self.mesh.A[2:-1]*u_k[2:-1] - self.mesh.A[1:-2]*u_k[1:-2])
         # Boundary Conditions
+        if self.rad_left:
+            cl = 0
+        else:
+            cl = 1
+        if self.rad_right:
+            cr = 0
+        else:
+            cr = 1
         # superdiagonal
         Mb[0, 1] = -A_k[1]*self.c/(3*(rho_k[0]*dh_k[0]*Kt[1] + rho_k[1]*dh_k[1]*Kt[1]))
         # main diagonal
         Mb[1, 0] = self.m[0]/(self.dt*rho_p[0]) + A_k[1]*self.c/(3*(rho_k[0]*dh_k[0]*Kt[1] + rho_k[1]*dh_k[1]*Kt[1])) +\
-                    A_k[0]*self.c/(3*rho_k[0]*dh_k[0]*Kt[0] + 4) + 0.5*self.m[0]*Ka[0]*self.c*(1-nu[0])
-        Mb[1, -1] = self.m[-1]/(self.dt*rho_p[-1]) + A_k[-1]*self.c/(3*rho_k[-1]*dh_k[-1]*Kt[-1]+4) + A_k[-2]*self.c/\
+                    cl * A_k[0]*self.c/(3*rho_k[0]*dh_k[0]*Kt[0] + 4) + 0.5*self.m[0]*Ka[0]*self.c*(1-nu[0])
+        Mb[1, -1] = self.m[-1]/(self.dt*rho_p[-1]) + cr * A_k[-1]*self.c/(3*rho_k[-1]*dh_k[-1]*Kt[-1]+4) + A_k[-2]*self.c/\
                     (3*(rho_k[-1]*dh_k[-1]*Kt[-2]+rho_k[-2]*dh_k[-2]*Kt[-2])) + 0.5*self.m[-1]*Ka[-1]*self.c*(1-nu[-1])
         # subdiagonal
         Mb[2, -2] = -A_k[-2]*self.c/(3*(rho_k[-1]*dh_k[-1]*Kt[-2]+rho_k[-2]*dh_k[-2]*Kt[-2]))
@@ -386,7 +402,8 @@ class RadHydroSolver:
 
     def compute_corrector_energy_densities(self, u_k, A_k, rho_k, dh_k, rho_c, T_p, T_pk, mat_e_p, P_pk, A_pk, rad_e_pk):
         """
-        
+        Member method to compute rad_e and mat_e for the corrector step. 
+        Also updates the time step rad_e and mat_e
         """
         # Compute cell-centered opacities
         Ka = self.compute_absorption_opacity(T_pk)
@@ -417,12 +434,20 @@ class RadHydroSolver:
                 (3*(rho_k[1:-1]*dh_k[1:-1]*Kt_p[1:-2] + rho_k[:-2]*dh_k[:-2]*Kt_p[1:-2])) + self.m[1:-1]*Ka[1:-1]*self.c*(1-nu[1:-1])*(self.a*T_pk[1:-1]**4 - 0.5 * self.rad_e[1:-1])\
                     + nu[1:-1]*xi[1:-1] - 1/3*rad_e_pk[1:-1]*(A_pk[2:-1]*u_k[2:-1] - A_pk[1:-2]*u_k[1:-2])
         # Boundary Conditions
+        if self.rad_left:
+            cl = 0
+        else:
+            cl = 1
+        if self.rad_right:
+            cr = 0
+        else:
+            cr = 1
         # superdiagonal
         Mb[0, 1] = -A_k[1]*self.c/(3*(rho_k[0]*dh_k[0]*Kt_p[1] + rho_k[1]*dh_k[1]*Kt_p[1]))
         # main diagonal
         Mb[1, 0] = self.m[0]/(self.dt*rho_c[0]) + A_k[1]*self.c/(3*(rho_k[0]*dh_k[0]*Kt_p[1] + rho_k[1]*dh_k[1]*Kt_p[1])) +\
-                    A_k[0]*self.c/(3*rho_k[0]*dh_k[0]*Kt_p[0] + 4) + 0.5*self.m[0]*Ka[0]*self.c*(1-nu[0])
-        Mb[1, -1] = self.m[-1]/(self.dt*rho_c[-1]) + A_k[-1]*self.c/(3*rho_k[-1]*dh_k[-1]*Kt_p[-1]+4) + A_k[-2]*self.c/\
+                    cl * A_k[0]*self.c/(3*rho_k[0]*dh_k[0]*Kt_p[0] + 4) + 0.5*self.m[0]*Ka[0]*self.c*(1-nu[0])
+        Mb[1, -1] = self.m[-1]/(self.dt*rho_c[-1]) + cr * A_k[-1]*self.c/(3*rho_k[-1]*dh_k[-1]*Kt_p[-1]+4) + A_k[-2]*self.c/\
                     (3*(rho_k[-1]*dh_k[-1]*Kt_p[-2]+rho_k[-2]*dh_k[-2]*Kt_p[-2])) + 0.5*self.m[-1]*Ka[-1]*self.c*(1-nu[-1])
         # subdiagonal
         Mb[2, -2] = -A_k[-2]*self.c/(3*(rho_k[-1]*dh_k[-1]*Kt_p[-2]+rho_k[-2]*dh_k[-2]*Kt_p[-2]))
