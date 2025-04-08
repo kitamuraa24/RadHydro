@@ -330,6 +330,39 @@ class RadHydroSolver:
         nu = (self.dt * Ka * 2* self.c * self.a * T**3)\
             /(self.Cv + self.dt * Ka * 2 *self.a * self.c * T**3)
         return nu
+    
+    def compute_artificial_viscosity(self, rho, dh, u, P):
+        """
+        Member method to compute artifical viscosity for the pressure.
+        """
+        c_Q = 0.25*(self.gamma + 1)
+        du = u[1:] - u[:-1]
+        # Steps to compute rho_bar:
+        rho_halfs = (rho[:-1]*dh[:-1] + rho[1:]*dh[1:])/(dh[:-1] + dh[1:])
+        rho_halfs = np.concatenate(([rho[0]], rho_halfs, [rho[-1]]))
+        rho_bar = 2 * rho_halfs[:-1]*rho_halfs[1:]/(rho_halfs[:-1] + rho_halfs[1:])
+        # steps to compute c_s bar:
+        c_s_halfs = (np.sqrt(self.gamma * P[:-1]/rho[:-1])*dh[:-1] +\
+              np.sqrt(self.gamma * P[1:]/rho[1:])*dh[1:]) /\
+              (dh[:-1] + dh[1:])
+        c_s_L = np.sqrt(self.gamma*P[0]/rho[0])
+        c_s_R = np.sqrt(self.gamma*P[-1]/rho[-1])
+        c_s_halfs = np.concatenate(([c_s_L], c_s_halfs, [c_s_R]))
+        c_s_bar = np.minimum.reduce(c_s_halfs[:-1], c_s_halfs[1:])
+        # Steps to determine Gamma:
+        R_neg = du[:-1]*dh[1:]/(dh[:-1]*du[1:])
+        R_neg = np.concatenate(([0], R_neg))
+        R_pos = du[1:]*dh[:-1]/(dh[1:]*du[:-1])
+        R_pos = np.concatenate((R_pos, [0]))
+        gamma_min = np.minimum.reduce([np.ones(self.mesh.ncells), 2*R_neg, 2*R_pos, 0.5*(R_neg + R_pos)])
+        Gamma = np.max(np.array([np.zeros(self.mesh.ncells), gamma_min]), axis=0)
+        # Compute Q_i:
+        Q_all = (1- Gamma)*rho_bar*np.abs(du)*(c_Q*np.abs(du) + np.sqrt(c_Q**2*du**2+c_s_bar**2))
+        # Condition: u_{i+1/2} < u_{i-1/2} 
+        condition = u[1:] < u[:-1]
+        # Apply condition, else it is 0
+        Q = np.where(condition, Q_all, 0.0)
+        return Q
 
     def compute_predictor_energy_densities(self, u_k, A_k, rho_k, dh_k, rho_p):
         """
