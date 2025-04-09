@@ -69,7 +69,7 @@ class Mesh:
                 print('\n')
 
 class RadHydroSolver:
-    def __init__(self, mesh, matProps, bc, init_cond, CFL, max_dt, max_rel_rad_e, time, solver_type, verbose=False):
+    def __init__(self, mesh, matProps, bc, init_cond, CFL, max_dt, max_rel_rad_e, time, solver_type, add_viscosity=False, verbose=False):
         """
         Object that handles solving the 1D RadHydro problem.
         """
@@ -134,6 +134,8 @@ class RadHydroSolver:
         else:
             self.rad_right = False
         self.balance = 0
+        self.add_viscosity = add_viscosity
+        
 
     def predictor_step(self):
         # Compute the edge rad_e
@@ -154,7 +156,12 @@ class RadHydroSolver:
         u_p = np.copy(self.u)
         self.dt = self.compute_time_step()
         # Calculate predictor u (u_p) #TODO: Treat boundary conditions
-        u_p[1:-1] = -self.dt/self.m_halfs[1:-1] * (self.mesh.A[1:-1] \
+        if self.add_viscosity:
+            Q = self.compute_artificial_viscosity(self.rho, self.mesh.dh, self.u, self.P)
+            u_p[1:-1] = -self.dt/self.m_halfs[1:-1] * (self.mesh.A[1:-1] \
+                            * (self.P[1:] + Q[1:] + 1/3*self.rad_e[1:] - self.P[:-1] - Q[:-1] - 1/3*self.rad_e[:-1])) + self.u[1:-1]
+        else:
+            u_p[1:-1] = -self.dt/self.m_halfs[1:-1] * (self.mesh.A[1:-1] \
                         * (self.P[1:] + 1/3*self.rad_e[1:] - self.P[:-1] - 1/3*self.rad_e[:-1])) + self.u[1:-1]
         if self.u_edge is None:
             u_p[0] = -self.mesh.A[0]*self.dt/(self.m_halfs[0])*\
@@ -213,7 +220,11 @@ class RadHydroSolver:
         """
         # Update velocities
         u_c = np.copy(self.u)
-        u_c[1:-1] = -A_pk[1:-1]/self.m_halfs[1:-1]*self.dt*(P_pk[1:] + 1/3*rad_e_pk[1:] - P_pk[:-1] - 1/3*rad_e_pk[:-1]) + self.u[1:-1]
+        if self.add_viscosity:
+            Q = self.compute_artificial_viscosity()
+            u_c[1:-1] = -A_pk[1:-1]/self.m_halfs[1:-1]*self.dt*(P_pk[1:] + Q[1:] + 1/3*rad_e_pk[1:] - P_pk[:-1] - Q[:-1] - 1/3*rad_e_pk[:-1]) + self.u[1:-1]
+        else:
+            u_c[1:-1] = -A_pk[1:-1]/self.m_halfs[1:-1]*self.dt*(P_pk[1:] + 1/3*rad_e_pk[1:] - P_pk[:-1] - 1/3*rad_e_pk[:-1]) + self.u[1:-1]
         if self.u_edge is None:
             u_c[0] = -A_pk[0]/self.m_halfs[0]*self.dt*(P_pk[0] + 1/3*rad_e_pk[0] - self.P_edge[0] - 1/3*rad_e_edge_pk[0]) + self.u[0]
             u_c[-1] = -A_pk[-1]/self.m_halfs[-1]*self.dt*(self.P_edge[-1] + 1/3*rad_e_edge_pk[-1] - P_pk[-1] - 1/3*rad_e_pk[-1]) + self.u[-1]
@@ -251,7 +262,6 @@ class RadHydroSolver:
         iter = 0
         # Compute balance for init. cond
         self.balance += - (0.5 * np.sum(self.m_halfs * (self.u)**2) + np.sum(self.m * (self.rad_e/self.rho + self.mat_e)))
-        print(self.balance)
         while t < t_end:
             A_pk, rad_e_pk, T_pk, T_p, P_pk, mat_e_p, rad_e_edge_pk = self.predictor_step()
             self.corrector_step(A_pk, rad_e_pk, T_p, T_pk, P_pk, mat_e_p, rad_e_edge_pk)
@@ -309,18 +319,26 @@ class RadHydroSolver:
         rho_new = self.m / V_new
         return rho_new
     
-    def compute_predictor_xi(self, u_k):
+    def compute_predictor_xi(self, u_k, rho_p, dh_k):
         """
         Member method to compute xi during predictor step for rad_e and mat_e
         """
-        xi = -self.P * (self.mesh.A[1:]*u_k[1:] - self.mesh.A[:-1]*u_k[:-1])
+        if self.add_viscosity:
+            Q = self.compute_artificial_viscosity(rho_p, dh_k, u_k, self.P)
+            xi = -(self.P + Q) * (self.mesh.A[1:]*u_k[1:] - self.mesh.A[:-1]*u_k[:-1])
+        else:
+            xi = -self.P * (self.mesh.A[1:]*u_k[1:] - self.mesh.A[:-1]*u_k[:-1])
         return xi
     
-    def compute_corrector_xi(self, mat_e_p, P_pk, A_pk, u_k):
+    def compute_corrector_xi(self, mat_e_p, P_pk, A_pk, u_k, rho_k, dh_k):
         """
         Member method to compute xi during corrector step for rad_e and mat_e
         """
-        xi = -self.m/self.dt*(mat_e_p - self.mat_e) - P_pk*(A_pk[1:]*u_k[1:] - A_pk[:-1]*u_k[:-1])
+        if self.add_viscosity:
+            Q = self.compute_artificial_viscosity(rho_k, dh_k, u_k, P_pk)
+            xi = -self.m/self.dt*(mat_e_p - self.mat_e)- (P_pk + Q) * (A_pk[1:]*u_k[1:] - A_pk[:-1]*u_k[:-1])
+        else:
+            xi = -self.m/self.dt*(mat_e_p - self.mat_e) - P_pk*(A_pk[1:]*u_k[1:] - A_pk[:-1]*u_k[:-1])
         return xi
 
     def compute_nu(self, Ka, T):
@@ -373,7 +391,7 @@ class RadHydroSolver:
         # Compute nu 
         nu = self.compute_nu(Ka, T=self.T)
         # Compute xi
-        xi = self.compute_predictor_xi(u_k)
+        xi = self.compute_predictor_xi(u_k, rho_k, dh_k)
         
         # Compute avg T at interior vertices
         T_vert = ((self.T[:-1]**4 + self.T[1:]**4)/2)**0.25
@@ -443,7 +461,7 @@ class RadHydroSolver:
         # Compute nu
         nu = self.compute_nu(Ka, T_p)
         # Compute xi
-        xi = self.compute_corrector_xi(mat_e_p, P_pk, A_pk, u_k)
+        xi = self.compute_corrector_xi(mat_e_p, P_pk, A_pk, u_k, rho_k, dh_k)
         # Compute vertex Temperatures from time avg predictor temp
         T_vert = ((T_pk[:-1]**4 + T_pk[1:]**4)/2)**0.25
         T_l = ((1/self.a * self.rad_e_edge[0] + T_pk[0]**4)/2)**0.25
@@ -568,7 +586,8 @@ if __name__ == "__main__":
     CFL = 0.5
     max_dt = 0.01
     max_rel_rad_e = 1
-    Solver = RadHydroSolver(mesh, matProps, bc, init_cond, CFL, max_dt, max_rel_rad_e, time, "RadHydro", verbose)
+    add_viscosity = False
+    Solver = RadHydroSolver(mesh, matProps, bc, init_cond, CFL, max_dt, max_rel_rad_e, time, "RadHydro", add_viscosity, verbose)
     Solver.solve()
 
 
